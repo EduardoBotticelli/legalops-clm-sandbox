@@ -13,13 +13,20 @@ import google.generativeai as genai
 warnings.filterwarnings("ignore")
 
 # --- 1. GOVERNANÇA E SEGURANÇA (Híbrido: Local + Cloud) ---
-caminho_env = os.path.join(os.path.dirname(__file__), 'API.env')
-if os.path.exists(caminho_env):
-    load_dotenv(caminho_env)
+# Primeiro, carregamos o ambiente local se ele existir (para uso no seu Mac)
+load_dotenv(os.path.join(os.path.dirname(__file__), 'API.env'))
 
-# Prioridade 1: Nuvem (st.secrets) | Prioridade 2: Local (os.getenv)
-GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
-CLICKSIGN_TOKEN = st.secrets.get("CLICKSIGN_TOKEN") or os.getenv("CLICKSIGN_TOKEN")
+# Função "Gatekeeper" para buscar as chaves sem derrubar o sistema
+def buscar_credencial(nome_chave):
+    try:
+        # Tenta buscar na nuvem (Secrets do Streamlit)
+        return st.secrets[nome_chave]
+    except Exception:
+        # Se não achar na nuvem, busca no ambiente local/sistema
+        return os.getenv(nome_chave)
+
+GEMINI_API_KEY = buscar_credencial("GEMINI_API_KEY")
+CLICKSIGN_TOKEN = buscar_credencial("CLICKSIGN_TOKEN")
 
 # --- 2. CONFIGURAÇÃO BASE DA IA ---
 if GEMINI_API_KEY:
