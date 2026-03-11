@@ -1,4 +1,3 @@
-```python
 import streamlit as st
 import os
 import io
@@ -34,7 +33,7 @@ st.set_page_config(page_title="CLM | LegalOps Hub", page_icon="⚖️", layout="
 
 st.markdown("""
 <style>
-    @import url('[https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap](https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap)');
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
     html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
     .stApp { background-color: #070B14; color: #F1F5F9; }
     
@@ -236,7 +235,7 @@ with tab_outbound:
                         else:
                             with st.spinner("Comunicando com o servidor Clicksign..."):
                                 try:
-                                    url_base = "[https://sandbox.clicksign.com/api/v1](https://sandbox.clicksign.com/api/v1)"
+                                    url_base = "https://sandbox.clicksign.com/api/v1"
                                     headers = {"Accept": "application/json", "Content-Type": "application/json"}
                                     file_b64 = base64.b64encode(out_bytes).decode('utf-8')
                                     payload_doc = {"document": {"path": f"/clm/Contrato_{sign_nome.replace(' ', '_')}.docx", "content_base64": f"data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,{file_b64}"}}
