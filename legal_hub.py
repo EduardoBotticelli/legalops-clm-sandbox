@@ -9,27 +9,20 @@ import json
 from docxtpl import DocxTemplate
 from dotenv import load_dotenv
 import google.generativeai as genai
-
 warnings.filterwarnings("ignore")
-
 # --- 1. GOVERNANÇA E SEGURANÇA ---
 load_dotenv(os.path.join(os.path.dirname(__file__), 'API.env'))
-
 def buscar_credencial(nome_chave):
     try: return st.secrets[nome_chave]
     except Exception: return os.getenv(nome_chave)
-
 GEMINI_API_KEY = buscar_credencial("GEMINI_API_KEY")
 CLICKSIGN_TOKEN = buscar_credencial("CLICKSIGN_TOKEN")
-
 # --- 2. CONFIGURAÇÃO BASE DA IA ---
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
     generation_config = {"temperature": 0.0, "response_mime_type": "application/json"}
-
 # --- 3. UI & CSS PREMIUM ---
 st.set_page_config(page_title="CLM | LegalOps Hub", page_icon="⚖️", layout="wide", initial_sidebar_state="collapsed")
-
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
@@ -60,22 +53,18 @@ st.markdown("""
     #MainMenu, footer, header { visibility: hidden; }
 </style>
 """, unsafe_allow_html=True)
-
 st.markdown("""
 <div class="hub-header">
     <div class="hub-title">⚖️ CLM Hub <span>| Automação & Inteligência</span></div>
     <div style="font-size: 0.9rem; color: #64748B; letter-spacing: 2px;">CONTRACT LIFECYCLE MANAGEMENT</div>
 </div>
 """, unsafe_allow_html=True)
-
 tab_inbound, tab_outbound = st.tabs(["🧠 Inbound: Revisão de Contratos (IA)", "📤 Outbound: Geração e Assinatura"])
-
 # --- MÓDULO 1: INBOUND (IA MATRIX) ---
 with tab_inbound:
     col_upload, col_result = st.columns([1, 2.2], gap="large")
     
     with col_upload:
-        # Bloco de instruções coeso e integrado (Não deixa a área de upload vazia)
         st.markdown('''
         <div style="background: #0B1120; border: 1px solid #1E293B; border-radius: 8px; padding: 1.5rem; margin-bottom: 1rem; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
             <div style="font-size: 1rem; font-weight: 600; color: #F8FAFC; margin-bottom: 0.8rem;">🧠 AUDITORIA SEMÂNTICA (IA)</div>
@@ -91,7 +80,6 @@ with tab_inbound:
             if not up_pdf: st.error("Por favor, anexe o documento PDF primeiro.")
             elif not GEMINI_API_KEY: st.error("🛑 Chave de API Ausente.")
             else: st.session_state['run_ia'] = True
-
     with col_result:
         if st.session_state.get('run_ia', False) and up_pdf:
             with st.spinner("Motor de IA a mapear os riscos do contrato..."):
@@ -113,14 +101,14 @@ with tab_inbound:
                     models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
                     sel_model = next((m for m in models if 'flash' in m.lower()), models[0])
                     
-                    res = genai.GenerativeModel("gemini-1.5-flash-latest", generation_config=generation_config).generate_content(prompt)
+                    # CORREÇÃO: usa sel_model em vez do nome hardcoded depreciado
+                    res = genai.GenerativeModel(sel_model, generation_config=generation_config).generate_content(prompt)
                     dados = json.loads(res.text)
                     
                     r_global = dados.get("risco_global", "BAIXO").upper()
                     if "ALTO" in r_global: bg, border, icone = "#2A1215", "#EF4444", "🔴"
                     elif "MED" in r_global: bg, border, icone = "#2B2510", "#F59E0B", "🟡"
                     else: bg, border, icone = "#0B2416", "#10B981", "🟢"
-
                     # Resumo Executivo Elegante
                     st.markdown(f'''<div style="background:{bg}; border:1px solid {border}; border-radius:8px; padding:1.8rem; margin-bottom:2.5rem; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
                         <div style="font-size:1.2rem; font-weight:800; color:{border}; margin-bottom: 8px;">{icone} RISCO CONTRATUAL {r_global}</div>
@@ -128,7 +116,6 @@ with tab_inbound:
                     
                     st.markdown("#### Inspeção de Cláusulas")
                     
-                    # Cartões de Cláusulas (Agora com espaçamento correto e fundo para o código)
                     for a in dados.get("achados", []):
                         cor_h = "#EF4444" if "ALTA" in a.get("gravidade", "").upper() else ("#F59E0B" if "MEDIA" in a.get("gravidade", "").upper() else "#10B981")
                         st.markdown(f"""
@@ -142,10 +129,8 @@ with tab_inbound:
                         </div>
                         """, unsafe_allow_html=True)
                 except Exception as e: st.error(f"Erro ao processar: {e}")
-
 # --- MÓDULO 2: OUTBOUND (GERAÇÃO E CLICKSIGN) ---
 with tab_outbound:
-    # Instruções integradas (Correção da Caixa Perdida do Print 3)
     st.markdown('''
     <div style="background: #0B1120; border: 1px solid #1E293B; border-radius: 8px; padding: 1.5rem; margin-bottom: 1rem; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
         <div style="font-size: 1rem; font-weight: 600; color: #F8FAFC; margin-bottom: 0.8rem;">📄 1. TEMPLATE MASTER (.DOCX)</div>
@@ -156,19 +141,15 @@ with tab_outbound:
     ''', unsafe_allow_html=True)
     
     up_docx = st.file_uploader("Upload do Template", type="docx", key="outbound_upload")
-
-    # TRAVA DE MEMÓRIA: Se o ficheiro for alterado/removido, limpa a etapa 3
     current_file_id = up_docx.file_id if up_docx else None
     if st.session_state.get('last_file_id') != current_file_id:
         st.session_state['last_file_id'] = current_file_id
         st.session_state.pop('out_bytes', None)
         st.session_state.pop('pronto_para_assinar', None)
-
     if up_docx:
         doc = DocxTemplate(io.BytesIO(up_docx.getvalue()))
         try: variaveis = doc.get_undeclared_template_variables()
         except: variaveis = []
-
         if not variaveis:
             st.warning("⚠️ O sistema não encontrou nenhuma variável (chaves {{...}}) neste documento. Altere o Word e tente novamente.")
         else:
@@ -176,7 +157,6 @@ with tab_outbound:
             
             with col_left:
                 with st.form("f_gen"):
-                    # Usando título nativo estilizado (Sem caixas fantasmas)
                     st.markdown('#### 2. Preenchimento de Dados')
                     contexto = {}
                     for var in sorted(variaveis):
@@ -192,15 +172,12 @@ with tab_outbound:
                     
                     st.markdown("<br>", unsafe_allow_html=True)
                     btn_gen = st.form_submit_button("Gerar Contrato Oficial")
-
             if btn_gen:
                 doc.render(contexto)
                 bio = io.BytesIO()
                 doc.save(bio)
                 st.session_state['out_bytes'] = bio.getvalue()
                 st.session_state['pronto_para_assinar'] = True
-
-            # Só exibe a Etapa 3 DEPOIS de preencher o form (Corrige o botão prematuro)
             if st.session_state.get('pronto_para_assinar') and 'out_bytes' in st.session_state:
                 with col_right:
                     st.markdown('#### 3. Assinatura e Envio')
@@ -209,7 +186,6 @@ with tab_outbound:
                     
                     st.markdown("<br>", unsafe_allow_html=True)
                     
-                    # Formulário de Assinatura isolado
                     with st.container():
                         st.markdown("<div style='font-size: 0.9rem; font-weight: 600; color: #38BDF8; margin-bottom: 10px;'>Integração Clicksign API</div>", unsafe_allow_html=True)
                         sign_nome = st.text_input("Nome do Signatário", placeholder="João da Silva")
