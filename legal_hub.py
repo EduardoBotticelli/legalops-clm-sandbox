@@ -1,40 +1,40 @@
 import streamlit as st
 import os
 import io
-import base64
-import requests
+import time
 import PyPDF2
 import warnings
 import json
 from docxtpl import DocxTemplate
 from dotenv import load_dotenv
 import google.generativeai as genai
-import streamlit as st
 
 # Ocultar marcação do Streamlit (menu, footer, e logo)
 hide_streamlit_style = """
             <style>
             #MainMenu {visibility: hidden;}
             footer {visibility: hidden;}
-            .viewerBadge_container__1QSob {visibility: hidden;} /* Esta é a classe do banner "Made with Streamlit" */
-            header {visibility: hidden;} /* Opcional: oculta o cabeçalho superior */
+            .viewerBadge_container__1QSob {visibility: hidden;}
+            header {visibility: hidden;}
             </style>
             """
 st.markdown(hide_streamlit_style, unsafe_allow_html=True)
 
-# Restante do seu código Streamlit...
 warnings.filterwarnings("ignore")
+
 # --- 1. GOVERNANÇA E SEGURANÇA ---
 load_dotenv(os.path.join(os.path.dirname(__file__), 'API.env'))
 def buscar_credencial(nome_chave):
     try: return st.secrets[nome_chave]
     except Exception: return os.getenv(nome_chave)
+
 GEMINI_API_KEY = buscar_credencial("GEMINI_API_KEY")
-CLICKSIGN_TOKEN = buscar_credencial("CLICKSIGN_TOKEN")
+
 # --- 2. CONFIGURAÇÃO BASE DA IA ---
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
     generation_config = {"temperature": 0.0, "response_mime_type": "application/json"}
+
 # --- 3. UI & CSS PREMIUM ---
 st.set_page_config(page_title="CLM | LegalOps Hub", page_icon="⚖️", layout="wide", initial_sidebar_state="collapsed")
 st.markdown("""
@@ -48,7 +48,7 @@ st.markdown("""
     .hub-title { font-size: 2rem; font-weight: 800; color: #F8FAFC; letter-spacing: -0.5px; }
     .hub-title span { color: #3B82F6; font-weight: 400; }
     
-    /* Títulos Nativos Estilizados (Substitui as Caixas Fantasmas) */
+    /* Títulos Nativos Estilizados */
     h4 { font-size: 1rem !important; font-weight: 600 !important; color: #94A3B8 !important; text-transform: uppercase !important; letter-spacing: 0.05em !important; margin-bottom: 1.2rem !important; border-bottom: 1px solid #1E293B !important; padding-bottom: 0.5rem !important; margin-top: 1.5rem !important;}
     
     /* Botões Premium */
@@ -64,16 +64,18 @@ st.markdown("""
     
     /* Esconder o label padrão do file_uploader e sujeiras visuais */
     [data-testid="stFileUploader"] label { display: none; }
-    #MainMenu, footer, header { visibility: hidden; }
 </style>
 """, unsafe_allow_html=True)
+
 st.markdown("""
 <div class="hub-header">
     <div class="hub-title">⚖️ CLM Hub <span>| Automação & Inteligência</span></div>
     <div style="font-size: 0.9rem; color: #64748B; letter-spacing: 2px;">CONTRACT LIFECYCLE MANAGEMENT</div>
 </div>
 """, unsafe_allow_html=True)
+
 tab_inbound, tab_outbound = st.tabs(["🧠 Inbound: Revisão de Contratos (IA)", "📤 Outbound: Geração e Assinatura"])
+
 # --- MÓDULO 1: INBOUND (IA MATRIX) ---
 with tab_inbound:
     col_upload, col_result = st.columns([1, 2.2], gap="large")
@@ -90,60 +92,77 @@ with tab_inbound:
         
         up_pdf = st.file_uploader("Upload do Contrato (.pdf)", type="pdf", key="inbound_upload")
         
+        # Limpa o cache da IA se um novo arquivo for enviado
+        current_pdf_id = up_pdf.file_id if up_pdf else None
+        if st.session_state.get('last_pdf_id') != current_pdf_id:
+            st.session_state['last_pdf_id'] = current_pdf_id
+            st.session_state.pop('ia_results', None)
+        
         if st.button("Executar Due Diligence Contratual"):
-            if not up_pdf: st.error("Por favor, anexe o documento PDF primeiro.")
-            elif not GEMINI_API_KEY: st.error("🛑 Chave de API Ausente.")
-            else: st.session_state['run_ia'] = True
+            if not up_pdf: 
+                st.error("Por favor, anexe o documento PDF primeiro.")
+            elif not GEMINI_API_KEY: 
+                st.error("🛑 Chave de API Ausente.")
+            else: 
+                with st.spinner("Motor de IA mapeando os riscos do contrato..."):
+                    try:
+                        leitor = PyPDF2.PdfReader(up_pdf)
+                        txt = "".join([p.extract_text() for p in leitor.pages])
+                        
+                        prompt = f"""Você é um Diretor de LegalOps avaliando um contrato. 
+                        RETORNE APENAS UM JSON VÁLIDO. Estrutura:
+                        {{
+                          "risco_global": "Alto/Médio/Baixo",
+                          "resumo": "Resumo clínico em 2 frases diretas.",
+                          "achados": [
+                            {{"dimensao": "Ex: LGPD / Financeiro / Prazo", "gravidade": "Alta/Media/Baixa", "titulo": "Título do Risco", "analise": "Sua análise técnica explicando o porquê do risco", "clausula": "Copie o trecho exato do texto"}}
+                          ]
+                        }}
+                        CONTRATO: {txt}"""
+                        
+                        models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+                        sel_model = next((m for m in models if 'flash' in m.lower()), models[0])
+                        
+                        res = genai.GenerativeModel(sel_model, generation_config=generation_config).generate_content(prompt)
+                        # Salva o resultado na sessão para não recarregar
+                        st.session_state['ia_results'] = res.text
+                    except Exception as e: 
+                        st.error(f"Erro ao processar a IA: {e}")
+
     with col_result:
-        if st.session_state.get('run_ia', False) and up_pdf:
-            with st.spinner("Motor de IA a mapear os riscos do contrato..."):
-                try:
-                    leitor = PyPDF2.PdfReader(up_pdf)
-                    txt = "".join([p.extract_text() for p in leitor.pages])
-                    
-                    prompt = f"""Você é um Diretor de LegalOps avaliando um contrato. 
-                    RETORNE APENAS UM JSON VÁLIDO. Estrutura:
-                    {{
-                      "risco_global": "Alto/Médio/Baixo",
-                      "resumo": "Resumo clínico em 2 frases diretas.",
-                      "achados": [
-                        {{"dimensao": "Ex: LGPD / Financeiro / Prazo", "gravidade": "Alta/Media/Baixa", "titulo": "Título do Risco", "analise": "Sua análise técnica explicando o porquê do risco", "clausula": "Copie o trecho exato do texto"}}
-                      ]
-                    }}
-                    CONTRATO: {txt}"""
-                    
-                    models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-                    sel_model = next((m for m in models if 'flash' in m.lower()), models[0])
-                    
-                    # CORREÇÃO: usa sel_model em vez do nome hardcoded depreciado
-                    res = genai.GenerativeModel(sel_model, generation_config=generation_config).generate_content(prompt)
-                    dados = json.loads(res.text)
-                    
-                    r_global = dados.get("risco_global", "BAIXO").upper()
-                    if "ALTO" in r_global: bg, border, icone = "#2A1215", "#EF4444", "🔴"
-                    elif "MED" in r_global: bg, border, icone = "#2B2510", "#F59E0B", "🟡"
-                    else: bg, border, icone = "#0B2416", "#10B981", "🟢"
-                    # Resumo Executivo Elegante
-                    st.markdown(f'''<div style="background:{bg}; border:1px solid {border}; border-radius:8px; padding:1.8rem; margin-bottom:2.5rem; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
-                        <div style="font-size:1.2rem; font-weight:800; color:{border}; margin-bottom: 8px;">{icone} RISCO CONTRATUAL {r_global}</div>
-                        <div style="font-size:0.95rem; color:#E2E8F0; line-height: 1.6;">{dados.get("resumo", "")}</div></div>''', unsafe_allow_html=True)
-                    
-                    st.markdown("#### Inspeção de Cláusulas")
-                    
-                    for a in dados.get("achados", []):
-                        cor_h = "#EF4444" if "ALTA" in a.get("gravidade", "").upper() else ("#F59E0B" if "MEDIA" in a.get("gravidade", "").upper() else "#10B981")
-                        st.markdown(f"""
-                        <div style='background:#0B1120; border:1px solid #1E293B; border-left:4px solid {cor_h}; border-radius:8px; padding:1.5rem; margin-bottom:1.5rem; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);'>
-                            <div style='font-size:1.05rem; font-weight:700; color:#F8FAFC; margin-bottom:8px;'>
-                                {a.get('titulo')} 
-                                <span style='font-size:0.75rem; background:#1E293B; padding:4px 10px; border-radius:12px; color:#94A3B8; margin-left:10px; font-weight:600;'>{a.get('dimensao')}</span>
-                            </div>
-                            <div style='font-size:0.9rem; color:#CBD5E1; line-height: 1.5; margin-bottom: 12px;'>{a.get('analise')}</div>
-                            <div style='font-size:0.85rem; background:#070B14; border: 1px solid #1E293B; padding:12px; border-radius:6px; color:#64748B; font-family:monospace; line-height:1.4;'>"{a.get('clausula')}"</div>
+        # Só renderiza se houver resultado salvo na sessão
+        if 'ia_results' in st.session_state:
+            try:
+                dados = json.loads(st.session_state['ia_results'])
+                
+                r_global = dados.get("risco_global", "BAIXO").upper()
+                if "ALTO" in r_global: bg, border, icone = "#2A1215", "#EF4444", "🔴"
+                elif "MED" in r_global: bg, border, icone = "#2B2510", "#F59E0B", "🟡"
+                else: bg, border, icone = "#0B2416", "#10B981", "🟢"
+                
+                # Resumo Executivo Elegante
+                st.markdown(f'''<div style="background:{bg}; border:1px solid {border}; border-radius:8px; padding:1.8rem; margin-bottom:2.5rem; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
+                    <div style="font-size:1.2rem; font-weight:800; color:{border}; margin-bottom: 8px;">{icone} RISCO CONTRATUAL {r_global}</div>
+                    <div style="font-size:0.95rem; color:#E2E8F0; line-height: 1.6;">{dados.get("resumo", "")}</div></div>''', unsafe_allow_html=True)
+                
+                st.markdown("#### Inspeção de Cláusulas")
+                
+                for a in dados.get("achados", []):
+                    cor_h = "#EF4444" if "ALTA" in a.get("gravidade", "").upper() else ("#F59E0B" if "MEDIA" in a.get("gravidade", "").upper() else "#10B981")
+                    st.markdown(f"""
+                    <div style='background:#0B1120; border:1px solid #1E293B; border-left:4px solid {cor_h}; border-radius:8px; padding:1.5rem; margin-bottom:1.5rem; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);'>
+                        <div style='font-size:1.05rem; font-weight:700; color:#F8FAFC; margin-bottom:8px;'>
+                            {a.get('titulo')} 
+                            <span style='font-size:0.75rem; background:#1E293B; padding:4px 10px; border-radius:12px; color:#94A3B8; margin-left:10px; font-weight:600;'>{a.get('dimensao')}</span>
                         </div>
-                        """, unsafe_allow_html=True)
-                except Exception as e: st.error(f"Erro ao processar: {e}")
-# --- MÓDULO 2: OUTBOUND (GERAÇÃO E CLICKSIGN) ---
+                        <div style='font-size:0.9rem; color:#CBD5E1; line-height: 1.5; margin-bottom: 12px;'>{a.get('analise')}</div>
+                        <div style='font-size:0.85rem; background:#070B14; border: 1px solid #1E293B; padding:12px; border-radius:6px; color:#64748B; font-family:monospace; line-height:1.4;'>"{a.get('clausula')}"</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+            except Exception as e: 
+                st.error(f"Erro ao exibir dados: {e}")
+
+# --- MÓDULO 2: OUTBOUND (GERAÇÃO E MOCKUP DE ASSINATURA) ---
 with tab_outbound:
     st.markdown('''
     <div style="background: #0B1120; border: 1px solid #1E293B; border-radius: 8px; padding: 1.5rem; margin-bottom: 1rem; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
@@ -156,14 +175,18 @@ with tab_outbound:
     
     up_docx = st.file_uploader("Upload do Template", type="docx", key="outbound_upload")
     current_file_id = up_docx.file_id if up_docx else None
+    
+    # Limpa dados de geração se o template mudar
     if st.session_state.get('last_file_id') != current_file_id:
         st.session_state['last_file_id'] = current_file_id
         st.session_state.pop('out_bytes', None)
         st.session_state.pop('pronto_para_assinar', None)
+        
     if up_docx:
         doc = DocxTemplate(io.BytesIO(up_docx.getvalue()))
         try: variaveis = doc.get_undeclared_template_variables()
         except: variaveis = []
+        
         if not variaveis:
             st.warning("⚠️ O sistema não encontrou nenhuma variável (chaves {{...}}) neste documento. Altere o Word e tente novamente.")
         else:
@@ -186,12 +209,14 @@ with tab_outbound:
                     
                     st.markdown("<br>", unsafe_allow_html=True)
                     btn_gen = st.form_submit_button("Gerar Contrato Oficial")
+                    
             if btn_gen:
                 doc.render(contexto)
                 bio = io.BytesIO()
                 doc.save(bio)
                 st.session_state['out_bytes'] = bio.getvalue()
                 st.session_state['pronto_para_assinar'] = True
+                
             if st.session_state.get('pronto_para_assinar') and 'out_bytes' in st.session_state:
                 with col_right:
                     st.markdown('#### 3. Assinatura e Envio')
@@ -201,32 +226,21 @@ with tab_outbound:
                     st.markdown("<br>", unsafe_allow_html=True)
                     
                     with st.container():
-                        st.markdown("<div style='font-size: 0.9rem; font-weight: 600; color: #38BDF8; margin-bottom: 10px;'>Integração Clicksign API</div>", unsafe_allow_html=True)
+                        st.markdown("<div style='font-size: 0.9rem; font-weight: 600; color: #38BDF8; margin-bottom: 10px;'>Simulador de Assinatura (Sandbox)</div>", unsafe_allow_html=True)
                         sign_nome = st.text_input("Nome do Signatário", placeholder="João da Silva")
                         sign_email = st.text_input("E-mail corporativo", placeholder="joao@empresa.com")
                         
-                        if st.button("🚀 Disparar Fluxo Clicksign"):
-                            if not CLICKSIGN_TOKEN: 
-                                st.error("Token da Clicksign ausente nas configurações.")
-                            elif not sign_nome or not sign_email: 
-                                st.warning("Preencha Nome e E-mail do Signatário.")
+                        if st.button("🚀 Simular Disparo via API"):
+                            if not sign_nome or not sign_email: 
+                                st.warning("⚠️ Preencha Nome e E-mail do Signatário para simular o envio.")
                             else:
-                                with st.spinner("Conectando ao servidor Clicksign..."):
-                                    try:
-                                        url_base = "https://sandbox.clicksign.com/api/v1"
-                                        headers = {"Accept": "application/json", "Content-Type": "application/json"}
-                                        file_b64 = base64.b64encode(st.session_state['out_bytes']).decode('utf-8')
-                                        payload_doc = {
-                                            "document": {
-                                                "path": f"/clm/Contrato_{sign_nome.replace(' ', '_')}.docx", 
-                                                "content_base64": f"data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,{file_b64}"
-                                            }
-                                        }
-                                        req_doc = requests.post(f"{url_base}/documents?access_token={CLICKSIGN_TOKEN}", headers=headers, json=payload_doc)
-                                        
-                                        if req_doc.status_code in [200, 201, 202]:
-                                            st.success(f"✅ Protocolo enviado com sucesso para: {sign_email}")
-                                        else:
-                                            st.error(f"Erro Clicksign: {req_doc.text}")
-                                    except Exception as e: 
-                                        st.error(f"Falha de Conexão: {e}")
+                                with st.spinner("Orquestrando disparo via API (Sandbox)..."):
+                                    time.sleep(1.5) # Simula latência de rede
+                                    
+                                    st.info(f"""
+                                    **🟢 Fluxo Orquestrado com Sucesso!**
+                                    
+                                    **Ambiente Sandbox:** Em uma operação real (Produção), este documento seria disparado via integração e o signatário **{sign_nome}** receberia um alerta no e-mail **{sign_email}**.
+                                    
+                                    *Para fins de demonstração neste portfólio, a API externa foi substituída por este simulador. O fluxo encerra com a disponibilização do download do contrato acima.*
+                                    """)
