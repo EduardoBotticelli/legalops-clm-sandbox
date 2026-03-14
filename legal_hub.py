@@ -9,6 +9,20 @@ import json
 from docxtpl import DocxTemplate
 from dotenv import load_dotenv
 import google.generativeai as genai
+import streamlit as st
+
+# Ocultar marcação do Streamlit (menu, footer, e logo)
+hide_streamlit_style = """
+            <style>
+            #MainMenu {visibility: hidden;}
+            footer {visibility: hidden;}
+            .viewerBadge_container__1QSob {visibility: hidden;} /* Esta é a classe do banner "Made with Streamlit" */
+            header {visibility: hidden;} /* Opcional: oculta o cabeçalho superior */
+            </style>
+            """
+st.markdown(hide_streamlit_style, unsafe_allow_html=True)
+
+# Restante do seu código Streamlit...
 warnings.filterwarnings("ignore")
 # --- 1. GOVERNANÇA E SEGURANÇA ---
 load_dotenv(os.path.join(os.path.dirname(__file__), 'API.env'))
